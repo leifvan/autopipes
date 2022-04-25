@@ -15,11 +15,11 @@ class QueueProtocol(Generic[T]):
     ``multiprocessing`` module adhere to these.
     """
 
-    def get(self, timeout: int = None) -> T:
+    def get(self, timeout: float = None) -> T:
         """Retrieves the first element from the queue."""
         raise NotImplementedError
 
-    def put(self, data: T, timeout: int = None) -> None:
+    def put(self, data: T, timeout: float = None) -> None:
         """Adds an element to the end of the queue."""
         raise NotImplementedError
 
@@ -30,27 +30,6 @@ class QueueProtocol(Generic[T]):
     def close(self) -> None:
         """Releases any resources this object uses."""
         raise NotImplementedError
-
-
-# class TypecheckedQueueWrapper(QueueProtocol[T]):
-#     def __init__(self, queue: QueueProtocol[T], type: Type[T]):
-#         self.queue = queue
-#         self.type = type
-#
-#     def get(self, timeout: int = None) -> T:
-#         data = self.queue.get(timeout)
-#
-#         if not isinstance(data, self.type):
-#             raise TypeError(f"Tried to get an item of type {type(data)} from the queue, but "
-#                             f"only {self.type} is allowed.")
-#
-#         return data
-#
-#     def put(self, data: T, timeout: int = None) -> None:
-#         if not isinstance(data, self.type):
-#             raise TypeError(f"Tried to put an item of type {type(data)} onto the queue, but "
-#                             f"only {self.type} is allowed.")
-#         self.queue.put(data, timeout)
 
 
 class SharedBytes:
@@ -195,14 +174,14 @@ class RingBufferQueue(QueueProtocol):
     def __reduce__(self):
         return self.__class__, (self.buffer_size, self._queue)
 
-    def get(self, timeout=None) -> T:
+    def get(self, timeout: float = None) -> T:
         """
         Returns the first item from the queue. If no element is available, the function blocks
         until an item is queued.
         """
         return self._queue.get(timeout=timeout)
 
-    def put(self, data: T, timeout=None) -> None:
+    def put(self, data: T, timeout: float = None) -> None:
         """Puts ``data`` into the queue and removes the oldest element if the queue is full."""
         overflow = self._queue.qsize() - self.buffer_size + 1
 
