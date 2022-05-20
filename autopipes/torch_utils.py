@@ -1,6 +1,7 @@
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
+@runtime_checkable
 class CUDAMoveable(Protocol):
     """
     A protocol for objects that provide ``.cpu()`` and ``.cuda()`` methods to move PyTorch tensors
