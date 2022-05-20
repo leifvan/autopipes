@@ -1,7 +1,7 @@
 from multiprocessing import Event, Queue
 from multiprocessing.shared_memory import SharedMemory
 from queue import Empty
-from typing import Any, Tuple, Generic, TypeVar, runtime_checkable
+from typing import Any, Tuple, Generic, TypeVar
 
 import numpy as np
 from numpy.typing import DTypeLike
@@ -9,7 +9,6 @@ from numpy.typing import DTypeLike
 T = TypeVar("T")
 
 
-@runtime_checkable
 class QueueProtocol(Generic[T]):
     """
     A basic protocol for queue-like objects. Both ``Queue`` and ``SimpleQueue`` from Python's
