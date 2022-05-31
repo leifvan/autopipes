@@ -8,10 +8,11 @@ from multiprocessing import Process, Event, Queue
 from queue import Empty
 from time import time
 from typing import Callable, Dict, Tuple, Iterable, List, Union, Optional
+from random import choice
 
 import numpy as np
 
-from autopipes.multiproc_utils import QueueProtocol
+from multiproc_utils import QueueProtocol
 
 QueueMappingType = Dict[str, QueueProtocol]
 QueueFactoryType = Callable[[], QueueProtocol]
@@ -52,8 +53,16 @@ def _sink_thread(queue: QueueProtocol):
 def _splitter_thread(base_queue: QueueProtocol, split_queues: Iterable[QueueProtocol]):
     while True:
         item = base_queue.get()
-        for queue in split_queues:
-            queue.put(item)
+
+        split_targets = list(split_queues)
+
+        while len(split_targets) > 0:
+            random_queue = choice(split_targets)
+            try:
+                random_queue.put(item, timeout=0)
+                split_targets.remove(random_queue)
+            except TimeoutError:
+                pass
 
 
 _make_sink = partial(_make_util_process, _sink_thread)
