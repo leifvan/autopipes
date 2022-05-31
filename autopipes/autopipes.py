@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import partial
 from multiprocessing import Process, Event, Queue
-from queue import Empty
+from queue import Empty, Full
 from time import time
 from typing import Callable, Dict, Tuple, Iterable, List, Union, Optional
 from random import choice
@@ -61,7 +61,7 @@ def _splitter_thread(base_queue: QueueProtocol, split_queues: Iterable[QueueProt
             try:
                 random_queue.put(item, timeout=0)
                 split_targets.remove(random_queue)
-            except TimeoutError:
+            except (TimeoutError, Full):
                 pass
 
 
