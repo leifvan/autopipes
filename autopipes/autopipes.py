@@ -12,7 +12,7 @@ from random import choice
 
 import numpy as np
 
-from multiproc_utils import QueueProtocol
+from autopipes.multiproc_utils import QueueProtocol
 
 QueueMappingType = Dict[str, QueueProtocol]
 QueueFactoryType = Callable[[], QueueProtocol]
