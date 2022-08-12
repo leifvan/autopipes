@@ -111,8 +111,9 @@ class Autoflow(Generic[T]):
     Python's multiprocessing library therefore apply here.
     """
 
-    def __init__(self):
+    def __init__(self, queue_factory: Callable = lambda: Queue(maxsize=1)):
         self.transformations: List[Transformation] = []
+        self.queue_factory = queue_factory
 
     def add_transformation(self, transformation: Transformation) -> None:
         """
@@ -145,11 +146,11 @@ class Autoflow(Generic[T]):
         Runs the pipeline until the abort_event is set.
         """
         abort_event = Event()
-        dispatch_queue = Queue()
-        exception_queue = Queue()
+        dispatch_queue = self.queue_factory()
+        exception_queue = self.queue_factory()
 
         for transformation in self.transformations:
-            transformation.initialize(Queue(maxsize=1), dispatch_queue, abort_event, exception_queue)
+            transformation.initialize(self.queue_factory(), dispatch_queue, abort_event, exception_queue)
 
         source_transformations = [t for t in self.transformations if t.is_source()]
 
