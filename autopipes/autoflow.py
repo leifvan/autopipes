@@ -7,39 +7,45 @@ be present and and add new fields to it.
 import queue
 import sys
 from dataclasses import dataclass
+from functools import partial
 from multiprocessing import Queue, Process, Event
-from typing import Generic, Collection, List, Container, Optional, Hashable, TypeVar, Callable
+from typing import Generic, Collection, List, Container, Optional, Hashable, TypeVar, Callable,\
+    Literal, Dict, Iterable, no_type_check
+
+import networkx as nx
 
 T = TypeVar("T", bound=Container)
 
 
-class NoTransformationFoundException(Exception):
-    """Raised if no transformation could be found for a data object."""
+class AutoflowDefinitionError(Exception):
+    """Raised if an error due to an invalid definition of the flow."""
 
 
-class NotASinkException(Exception):
-    """Raised if a transformation does not return a value, even though it is not a sink."""
-
-
-class SinkException(Exception):
-    """Raised if a sink node returns a value."""
-
-
-class NoSourceException(Exception):
-    """Raised if the pipeline contains no source node."""
+class AutoflowInitializationError(Exception):
+    """Raised if an internal error occurs while initialization the flow."""
 
 
 @dataclass
 class Transformation:
+    """
+    Dataclass representing an Autoflow transformation and its metadata needed during execution.
+    Subclass this and override the ``apply`` method to define the transformation, or override
+    ``thread`` or even ``_initialize`` if you need more flexibility.
+
+    By default, the ``apply`` method will run in a separate Python process and be called with
+    the output of the previous transformation (or possibly ``None`` if it is the first operation
+    in the pipeline).
+    """
+
     requires: Optional[Collection[Hashable]]
     adds: Optional[Collection[Hashable]]
-    worker: Process = None
-    in_queue: Queue = None
-    out_queue: Queue = None
-    abort_event: Event = None
-    exception_queue: Queue = None
+    worker: Optional[Process] = None
+    in_queue: Optional[Queue] = None
+    out_queue: Optional[Queue] = None
+    abort_event: Optional[Event] = None
+    exception_queue: Optional[Queue] = None
 
-    def initialize(
+    def _initialize(
             self,
             in_queue: Queue,
             out_queue: Queue,
@@ -59,6 +65,9 @@ class Transformation:
         self.worker.start()
 
     def can_process(self, item: Container) -> bool:
+        """
+        Returns ``True`` if this transformation is applicable to ``item`` and ``False`` otherwise.
+        """
         if self.requires is not None and any(r not in item for r in self.requires):
             return False
         if self.adds is not None and any(a in item for a in self.adds):
@@ -66,22 +75,33 @@ class Transformation:
         return True
 
     def is_source(self) -> bool:
+        """
+        Returns ``True`` if this transformation is a source, i.e. adds annotations without
+        requiring any. Otherwise, returns ``False``.
+        """
         return self.requires is None
 
     def is_sink(self) -> bool:
+        """
+        Returns ``True`` if this transformation is a sink, i.e. requires annotations without adding
+        any. Otherwise, returns ``False``.
+        """
         return self.adds is None
 
     def thread(self):
+        """
+        This method will be run in a subprocess when ``_initialize`` is called. It is expected to
+        process items from ``in_queue`` and put the results into the ``out_queue`` as long as the
+        ``abort_event`` is not set. Additionally, it should add any unhandled exceptions into the
+        ``exceptions_queue`` and set the ``abort_event`` if that happens.
+
+        By default, it processes items by calling the ``apply`` method of this instance.
+        """
         try:
             while not self.abort_event.is_set():
-                data = self.in_queue.get()
+                data = None if self.in_queue is None else self.in_queue.get()
                 new_data = self.apply(data)
-                if new_data is None and not self.is_sink():
-                    raise NotASinkException(f"{self} did not return a value, even though it is "
-                                            f"not a sink.")
-                elif new_data is not None and self.is_sink():
-                    raise SinkException(f"{self} is a sink, but returned a value.")
-                elif new_data is not None:
+                if self.out_queue is not None:
                     self.out_queue.put(new_data)
 
         except Exception as e:
@@ -90,10 +110,21 @@ class Transformation:
             self.exception_queue.put(e)
 
     def apply(self, data: T):
+        """
+        Processes a given ``data`` object and returns the result.
+        """
         raise NotImplementedError
 
     def __repr__(self):
         return f"Transformation {self.requires} -> {self.adds}"
+
+
+OptimizationMode = Literal[None, "earliest_sinks", "min_annotations"]
+
+
+def _cleaned_topological_sorts(graph):
+    for sort in nx.all_topological_sorts(graph):
+        yield [i for i in sort if i != "source"]
 
 
 class Autoflow(Generic[T]):
@@ -141,46 +172,179 @@ class Autoflow(Generic[T]):
         t.apply = transformation_fn
         self.add_transformation(t)
 
-    def run(self) -> None:
+    def _loss_earliest_sinks(self, sort: Iterable[int]) -> float:
+        sink_indices = [i for i, t in enumerate(self.transformations) if t.is_sink()]
+        num_sinks_left = len(sink_indices)
+        weight = 0
+        for s in sort:
+            if s in sink_indices:
+                num_sinks_left -= 1
+            weight += num_sinks_left
+
+        return weight
+
+    def _loss_min_annotations(self, sort: Iterable[int]) -> float:
+        weight = 0
+        num_annotations = 0
+
+        for s in sort:
+            weight += num_annotations
+            if not self.transformations[s].is_sink():
+                num_annotations += len(self.transformations[s].adds)
+
+        return weight
+
+    _optimization_losses: Dict[OptimizationMode, Callable[[Iterable[int]], float]] = {
+        "earliest_sinks": _loss_earliest_sinks,
+        "min_annotations": _loss_min_annotations
+    }
+
+    def run(
+            self,
+            allow_unused_annotations: bool = False,
+            optimize: OptimizationMode = None
+    ) -> None:
         """
-        Runs the pipeline until the abort_event is set.
+        Runs the pipeline until the abort_event is set in one of the transformations.
+
+        Before running, the method will check if the definition of the pipeline is correct in the
+        sense that
+
+         * at least one transformation is added,
+         * the requirements of all annotations can be fulfilled,
+         * no more than one transformation annotates the same value,
+         * there are no cyclic dependencies,
+         * all transformations will be used and
+         * no annotations are unused (optional).
+
+        By default, the order of execution of the transformations is any valid order given the
+        constraints (required & adds parameters). This can be changed by choosing one of the
+        following cost functions for the ``optimize`` parameter:
+
+          * ``"earliest_sinks"``: Sink transformations will be placed as close to the beginning as
+            possible.
+          * ``"min_annotations"``: The number of annotations existing per transformation step is
+            minimized.
+
+
+        :param allow_unused_annotations: If ``True``, this method will not throw an exception if
+             transformations are added whose annotations are not required by any other
+             transformation.
+        :param optimize: Can be ``earliest_sinks``, ``"min_annotations"`` or ``None``.
         """
+
+        # check if there are any transformations
+        if len(self.transformations) == 0:
+            raise AutoflowDefinitionError("No transformations were added to the flow.")
+
+        # create a map: annotation -> transformation adding it
+        producers = dict()
+        for idx, t in enumerate(self.transformations):
+            if t.adds is not None:
+                for add in t.adds:
+                    if add in producers:
+                        raise AutoflowDefinitionError("More than one transformation adds the same value.")
+                    producers[add] = idx
+
+        # create a graph that represents a partial ordering of the transformations
+        graph = nx.DiGraph()
+        try:
+            for idx, t in enumerate(self.transformations):
+                if t.requires is not None:
+                    for req in t.requires:
+                        graph.add_edge(producers[req], idx)
+                else:
+                    graph.add_edge("source", idx)
+        except KeyError as e:
+            raise AutoflowDefinitionError(f"No transformation exists that produces {e}.")
+
+        # find a topological sort of the transformations based on the graph
+
+        try:
+            if optimize is None:
+                top_sort_indices = list(nx.algorithms.dag.topological_sort(graph))[1:]
+            else:
+                compute_weight = partial(self._optimization_losses[optimize], self)
+                top_sort_indices = min(_cleaned_topological_sorts(graph), key=compute_weight)
+        except nx.exception.NetworkXUnfeasible:
+            raise AutoflowDefinitionError("Cyclic dependency was detected.")
+
+        if len(top_sort_indices) < len(self.transformations):
+            raise AutoflowInitializationError("The topological ordering does not include all "
+                                              "nodes. This might be due to missing connectivity.")
+
+        # check if the output is valid in the sense that
+        #  - every required annotation is present
+        #  - there are no superfluous annotations (optional)
+        annotated_usages: Dict[Hashable, int] = dict()
+
+        for s in top_sort_indices:
+            t = self.transformations[s]
+
+            if t.requires is not None:
+                for r in t.requires:
+                    # this throws a KeyError if r is not annotated in previous transformations
+                    annotated_usages[r] += 1
+
+            if t.adds is not None:
+                for a in t.adds:
+                    annotated_usages[a] = 0
+
+        if not allow_unused_annotations:
+            for key, count in annotated_usages.items():
+                if count == 0:
+                    raise AutoflowDefinitionError(f"Flow annotates unused key '{key}'.")
+
+        # sort transformations array according to topological order
+        self.transformations = [self.transformations[i] for i in top_sort_indices]
+
+        # create queues and events
         abort_event = Event()
-        dispatch_queue = self.queue_factory()
-        exception_queue = self.queue_factory()
+        exception_queue = Queue()
+        queues = [self.queue_factory() for _ in range(len(self.transformations) - 1)]
 
-        for transformation in self.transformations:
-            transformation.initialize(self.queue_factory(), dispatch_queue, abort_event, exception_queue)
+        for t, last_queue, next_queue in zip(self.transformations, [None, *queues], [*queues, None]):
+            t._initialize(
+                in_queue=last_queue,
+                out_queue=next_queue,
+                abort_event=abort_event,
+                exception_queue=exception_queue
+            )
 
-        source_transformations = [t for t in self.transformations if t.is_source()]
-
-        if len(source_transformations) == 0:
-            raise NoSourceException
-
+        # run and wait for exceptions in the respective queue
         while not abort_event.is_set():
-            # try to send empty wrappers to sources
-            for transformation in source_transformations:
-                try:
-                    transformation.in_queue.put_nowait(None)
-                except queue.Full:
-                    pass
-
-            # get next item to be dispatched
-            item = dispatch_queue.get()
-
-            # find a suitable transformation
             try:
-                transformation = next(t for t in self.transformations if t.can_process(item))
-                transformation.in_queue.put(item)
-            except StopIteration:
-                raise NoTransformationFoundException(f"No transformation exists for {item}")
+                e = exception_queue.get(timeout=1)
+                abort_event.set()
+                raise e
+            except queue.Empty:
+                pass
 
-        for t in self.transformations:
-            t.worker.join(timeout=1)
-            t.worker.kill()
-
+        # abort event was set, throw the remaining exceptions
         try:
             while True:
                 raise exception_queue.get_nowait()
         except queue.Empty:
             pass
+
+
+@no_type_check
+def main():
+    flow = Autoflow()
+    flow.add_transformation_fn(lambda: None, None, ["rgbd"])
+    flow.add_transformation_fn(lambda: None, None, ["server_pose"])
+    flow.add_transformation_fn(lambda: None, ["rgbd"], ["seg"])
+    flow.add_transformation_fn(lambda: None, ["rgbd"], ["flow"])
+    flow.add_transformation_fn(lambda: None, ["rgbd", "seg"], ["odom"])
+    flow.add_transformation_fn(lambda: None, ["seg"], ["unused"])
+    flow.add_transformation_fn(lambda: None, ["rgbd", "odom"], ["exp_flow"])
+    flow.add_transformation_fn(lambda: None, ["rgbd", "flow", "exp_flow"], ["dyn"])
+    flow.add_transformation_fn(lambda: None, ["dyn"], ["static_rgbd", "dynamic_rgbd"])
+    flow.add_transformation_fn(lambda: None, ["static_rgbd", "server_pose"], None)
+    flow.add_transformation_fn(lambda: None, ["dynamic_rgbd", "server_pose"], None)
+    flow.add_transformation_fn(lambda: None, ["unused"], None)
+    flow.run(optimize="min_annotations")
+
+
+if __name__ == '__main__':
+    main()
