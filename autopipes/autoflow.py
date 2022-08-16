@@ -59,8 +59,7 @@ class Transformation:
 
         self.worker = Process(
             target=self.thread,
-            args=tuple(),
-            daemon=True
+            args=tuple()
         )
         self.worker.start()
 
