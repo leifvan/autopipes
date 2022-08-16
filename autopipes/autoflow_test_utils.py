@@ -37,16 +37,16 @@ class CompareItemsTransformation(Transformation):
 
     # noinspection PyMissingOrEmptyDocstring
     def apply(self, data: T):
-        if len(self.expected_items) == 0:
-            raise SuccessfulComparisonException(f"Successfully compared {self.num_items_compared} "
-                                                f"items.")
-
         next_item = self.expected_items.pop(0)
         if next_item is not None and not self.compare(data, next_item):
             raise FailedComparisonException(f"Comparison failed. Expected '{next_item}', but got "
                                             f"'{data}'.")
 
         self.num_items_compared += 1
+
+        if len(self.expected_items) == 0:
+            raise SuccessfulComparisonException(f"Successfully compared {self.num_items_compared} "
+                                                f"items.")
 
 
 class CountItemsTransformation(CompareItemsTransformation):
