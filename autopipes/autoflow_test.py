@@ -1,16 +1,13 @@
 import unittest
-
+from multiprocessing import Semaphore
 from time import time, sleep
 from typing import List, Optional
-from multiprocessing import Semaphore
+
 from autoflow import Transformation, Autoflow, AutoflowDefinitionError
+from autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException
 
 
 class TestException(Exception):
-    pass
-
-
-class FastEnoughException(Exception):
     pass
 
 
@@ -19,12 +16,10 @@ class TestTransformation(Transformation):
             self,
             requires: Optional[List[str]],
             adds: Optional[List[str]],
-            test_speed: bool = False
     ):
         super(TestTransformation, self).__init__(requires=requires, adds=adds)
         self.start_time = time()
         self.num_items = 0
-        self.test_speed = test_speed
 
     def apply(self, data):
         if data is None:
@@ -33,13 +28,7 @@ class TestTransformation(Transformation):
             for field in self.adds:
                 data[field] = 0
             return data
-        else:
-            if self.test_speed and self.num_items > 0 and self.num_items % 100 == 0:
-                duration = time() - self.start_time
-                print(f"{self.num_items / duration:.2f} items/s")
-                if self.num_items / duration > 1000:
-                    raise FastEnoughException(f"Reached {self.num_items / duration:.2f} items/s.")
-            self.num_items += 1
+        self.num_items += 1
 
 
 class CountingCompleteException(Exception):
@@ -53,7 +42,7 @@ class CountingTestTransformation(TestTransformation):
             adds: Optional[List[str]],
             semaphore: Semaphore
     ):
-        super(CountingTestTransformation, self).__init__(requires, adds, test_speed=False)
+        super(CountingTestTransformation, self).__init__(requires, adds)
         self.semaphore = semaphore
         self.counted = False
 
@@ -65,29 +54,16 @@ class CountingTestTransformation(TestTransformation):
         if self.semaphore.acquire(block=False):
             self.semaphore.release()
         else:
-            raise CountingCompleteException("Semaphore can't be acquired.")
+            raise CountingCompleteException("Semaphore can't be acquired (which is a good thing).")
 
         return super(CountingTestTransformation, self).apply(data)
-
-
-def test_faulty_transformation_fn(data):
-    raise TestException("Just a test exception.")
-
-
-def test_transformation_fn_x(data):
-    data["x"] = 0
-    return data
-
-
-def test_transformation_fn_none(data):
-    pass
 
 
 class AutoflowTest(unittest.TestCase):
     def test_workers_terminate(self):
         flow = Autoflow()
         flow.add_transformation(TestTransformation(None, ["a"]))
-        flow.add_transformation_fn(test_faulty_transformation_fn, ["a"], None)
+        flow.add_transformation(RaiseExceptionTransformation(["a"], None, TestException))
         with self.assertRaises(TestException):
             flow.run()
 
@@ -142,7 +118,7 @@ class AutoflowTest(unittest.TestCase):
         """
         flow = Autoflow()
         flow.add_transformation(TestTransformation(None, ["a"]))
-        flow.add_transformation_fn(test_faulty_transformation_fn, ["a"], None)
+        flow.add_transformation(RaiseExceptionTransformation(["a"], None, TestException))
         with self.assertRaises(TestException):
             flow.run()
 
@@ -166,7 +142,7 @@ class AutoflowTest(unittest.TestCase):
         flow.add_transformation(TestTransformation(["b"], ["c"]))
         flow.add_transformation(TestTransformation(["c"], ["d"]))
         flow.add_transformation(TestTransformation(["d"], None))
-        flow.add_transformation_fn(test_faulty_transformation_fn, ["a"], None)
+        flow.add_transformation(RaiseExceptionTransformation(["a"], None, TestException))
 
         source = flow.transformations[0]
         sink = flow.transformations[-1]
@@ -202,7 +178,7 @@ class AutoflowTest(unittest.TestCase):
         flow.add_transformation(TestTransformation(["a"], ["e", "f", "g", "h", "i", "j"]))
         flow.add_transformation(TestTransformation(["c"], None))
         flow.add_transformation(TestTransformation(["e", "f", "g", "h", "i"], None))
-        flow.add_transformation_fn(test_faulty_transformation_fn, ["j"], None)
+        flow.add_transformation(RaiseExceptionTransformation(["j"], None, TestException))
 
         big_node = flow.transformations[3]
 
@@ -220,7 +196,7 @@ class AutoflowTest(unittest.TestCase):
         flow = Autoflow()
         flow.add_transformation(TestTransformation(None, ["a"]))
         flow.add_transformation(TestTransformation(["a"], ["b"]))
-        flow.add_transformation_fn(test_faulty_transformation_fn, ["a"], None)
+        flow.add_transformation(RaiseExceptionTransformation(["a"], None, TestException))
         with self.assertRaises(AutoflowDefinitionError):
             flow.run(allow_unused_annotations=False)
 
@@ -231,7 +207,7 @@ class AutoflowTest(unittest.TestCase):
         flow = Autoflow()
         flow.add_transformation(TestTransformation(None, ["a"]))
         flow.add_transformation(TestTransformation(["a"], ["b"]))
-        flow.add_transformation_fn(test_faulty_transformation_fn, ["a"], None)
+        flow.add_transformation(RaiseExceptionTransformation(["a"], None, TestException))
         with self.assertRaises(TestException):
             flow.run(allow_unused_annotations=True)
 
@@ -260,8 +236,13 @@ class AutoflowTest(unittest.TestCase):
         flow.add_transformation(TestTransformation(["b", "c"], ["d", "e"]))
         flow.add_transformation(TestTransformation(["e"], ["f"]))
         flow.add_transformation(TestTransformation(["d", "f"], ["g"]))
-        flow.add_transformation(TestTransformation(["g"], None, test_speed=True))
-        with self.assertRaises(FastEnoughException):
+        flow.add_transformation(MeasureSpeedTransformation(
+            requires=["g"],
+            target_items_per_sec=1000,
+            max_num_items=1000,
+            print_speed_every=100)
+        )
+        with self.assertRaises(TargetSpeedReachedException):
             flow.run()
 
 

@@ -6,10 +6,11 @@ be present and and add new fields to it.
 
 import queue
 import sys
+import traceback
 from dataclasses import dataclass
 from functools import partial
 from multiprocessing import Queue, Process, Event
-from typing import Generic, Collection, List, Container, Optional, Hashable, TypeVar, Callable,\
+from typing import Generic, Collection, List, Container, Optional, Hashable, TypeVar, Callable, \
     Literal, Dict, Iterable, no_type_check
 
 import networkx as nx
@@ -105,6 +106,7 @@ class Transformation:
 
         except Exception as e:
             print(f"[Autoflow] {self} has caused an exception: {e}", file=sys.stderr, flush=True)
+            traceback.print_tb(e.__traceback__, file=sys.stderr)
             self.abort_event.set()
             self.exception_queue.put(e)
 
