@@ -1,7 +1,7 @@
 from time import time
 from typing import Hashable, Callable, List, Container, TypeVar, Optional, Collection
 
-from autoflow import Transformation
+from .autoflow import Transformation
 
 T = TypeVar("T", bound=Container)
 

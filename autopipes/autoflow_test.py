@@ -3,8 +3,8 @@ from multiprocessing import Semaphore
 from time import time, sleep
 from typing import List, Optional
 
-from autoflow import Transformation, Autoflow, AutoflowDefinitionError
-from autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException
+from .autoflow import Transformation, Autoflow, AutoflowDefinitionError
+from .autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException
 
 
 class TestException(Exception):

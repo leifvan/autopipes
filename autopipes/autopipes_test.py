@@ -1,9 +1,8 @@
 from multiprocessing import Process
-
-from autopipes import Pipeline
 from time import sleep
 
-from visualize import visualize_pipeline
+from .autopipes import Pipeline
+from .visualize import visualize_pipeline
 
 
 def make_util_process(target, *args):
