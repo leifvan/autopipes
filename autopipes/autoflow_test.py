@@ -1,6 +1,6 @@
 import unittest
 
-from time import time
+from time import time, sleep
 from typing import List, Optional
 from multiprocessing import Semaphore
 from autoflow import Transformation, Autoflow, AutoflowDefinitionError
@@ -45,6 +45,7 @@ class TestTransformation(Transformation):
 class CountingCompleteException(Exception):
     pass
 
+
 class CountingTestTransformation(TestTransformation):
     def __init__(
             self,
@@ -83,6 +84,16 @@ def test_transformation_fn_none(data):
 
 
 class AutoflowTest(unittest.TestCase):
+    def test_workers_terminate(self):
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(None, ["a"]))
+        flow.add_transformation_fn(test_faulty_transformation_fn, ["a"], None)
+        with self.assertRaises(TestException):
+            flow.run()
+
+        sleep(2)  # give worker threads a short amount of time to finish
+        self.assertTrue(all(not t.worker.is_alive() for t in flow.transformations))
+
     def test_missing_transformation(self):
         """
         Flow is missing a transformation to reach the sink node. It should detect this.

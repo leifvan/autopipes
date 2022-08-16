@@ -311,20 +311,29 @@ class Autoflow(Generic[T]):
             )
 
         # run and wait for exceptions in the respective queue
+        abort_exception = None
+
         while not abort_event.is_set():
             try:
-                e = exception_queue.get(timeout=1)
+                abort_exception = exception_queue.get(timeout=1)
                 abort_event.set()
-                raise e
             except queue.Empty:
                 pass
 
-        # abort event was set, throw the remaining exceptions
-        try:
-            while True:
-                raise exception_queue.get_nowait()
-        except queue.Empty:
-            pass
+        # abort_event was set; briefly try to join the workers, kill them if it takes too long
+        for t in self.transformations:
+            t.worker.join(timeout=1)
+            t.worker.kill()
+
+        # throw the next exception, if any
+        if abort_exception is None:
+            try:
+                while True:
+                    raise exception_queue.get_nowait()
+            except queue.Empty:
+                pass
+        else:
+            raise abort_exception
 
 
 @no_type_check
