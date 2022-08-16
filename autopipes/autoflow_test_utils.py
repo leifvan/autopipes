@@ -1,3 +1,4 @@
+from multiprocessing import Queue
 from time import time
 from typing import Hashable, Callable, List, Container, TypeVar, Optional, Collection
 
@@ -169,3 +170,27 @@ class RaiseExceptionTransformation(Transformation):
 
     def apply(self, data: T):
         raise self.exception_factory()
+
+
+class AllItemsCollectedException(Exception):
+    """Raised if ``CollectInputsTransformation`` has collected the required number of items."""
+
+
+class CollectInputsTransformation(Transformation):
+    """
+    Collects ``num_items`` items and puts them into a queue ``self.collected_items``. Raises an
+    ``AllItemsCollectedException`` when the desired number of items was collected.
+    """
+
+    def __init__(self, requires: Optional[Collection[Hashable]], num_items: int):
+        super(CollectInputsTransformation, self).__init__(requires=requires, adds=None)
+        self.num_items_to_collect = num_items
+        self.num_items_collected = 0
+        self.collected_items = Queue()
+
+    def apply(self, data: T):
+        self.collected_items.put(data)
+        self.num_items_collected += 1
+        if self.num_items_collected >= self.num_items_to_collect:
+            raise AllItemsCollectedException(f"Successfully collected {self.num_items_collected} "
+                                             f"items.")
