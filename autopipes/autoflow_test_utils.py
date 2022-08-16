@@ -1,6 +1,6 @@
 from multiprocessing import Queue
 from time import time
-from typing import Hashable, Callable, List, Container, TypeVar, Optional, Collection
+from typing import Hashable, Callable, List, Container, TypeVar, Optional, Collection, Any
 
 from .autoflow import Transformation
 
@@ -182,14 +182,19 @@ class CollectInputsTransformation(Transformation):
     ``AllItemsCollectedException`` when the desired number of items was collected.
     """
 
-    def __init__(self, requires: Optional[Collection[Hashable]], num_items: int):
+    def __init__(
+            self,
+            requires: Optional[Collection[Hashable]],
+            num_items: int,
+            collect_queue: Any = None
+    ):
         super(CollectInputsTransformation, self).__init__(requires=requires, adds=None)
         self.num_items_to_collect = num_items
         self.num_items_collected = 0
-        self.collected_items = Queue()
+        self.collect_queue = Queue() if collect_queue is None else collect_queue
 
     def apply(self, data: T):
-        self.collected_items.put(data)
+        self.collect_queue.put(data)
         self.num_items_collected += 1
         if self.num_items_collected >= self.num_items_to_collect:
             raise AllItemsCollectedException(f"Successfully collected {self.num_items_collected} "
