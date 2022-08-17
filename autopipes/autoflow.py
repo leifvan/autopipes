@@ -16,6 +16,7 @@ from typing import Generic, Collection, List, Container, Optional, Hashable, Typ
 import networkx as nx
 
 T = TypeVar("T", bound=Container)
+QUEUE_TIMEOUT = 60
 
 
 class AutoflowDefinitionError(Exception):
@@ -99,16 +100,16 @@ class Transformation:
         """
         try:
             while not self.abort_event.is_set():
-                data = None if self.in_queue is None else self.in_queue.get()
+                data = None if self.in_queue is None else self.in_queue.get(timeout=QUEUE_TIMEOUT)
                 new_data = self.apply(data)
                 if self.out_queue is not None:
-                    self.out_queue.put(new_data)
+                    self.out_queue.put(new_data, timeout=QUEUE_TIMEOUT)
 
         except Exception as e:
             print(f"[Autoflow] {self} has caused an exception: {e}", file=sys.stderr, flush=True)
             traceback.print_tb(e.__traceback__, file=sys.stderr)
             self.abort_event.set()
-            self.exception_queue.put(e)
+            self.exception_queue.put(e, timeout=QUEUE_TIMEOUT)
 
     def apply(self, data: T):
         """
@@ -331,7 +332,7 @@ class Autoflow(Generic[T]):
         if abort_exception is None:
             try:
                 while True:
-                    raise exception_queue.get_nowait()
+                    raise exception_queue.get(timeout=0)
             except queue.Empty:
                 pass
         else:

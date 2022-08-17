@@ -3,7 +3,9 @@ from multiprocessing import Semaphore
 from time import time, sleep
 from typing import List, Optional
 
-from .autoflow import Transformation, Autoflow, AutoflowDefinitionError
+import queue
+
+from .autoflow import Transformation, Autoflow, AutoflowDefinitionError, QUEUE_TIMEOUT
 from .autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException
 
 
@@ -59,7 +61,18 @@ class CountingTestTransformation(TestTransformation):
         return super(CountingTestTransformation, self).apply(data)
 
 
+def sleep_transformation(data):
+    sleep(2 * QUEUE_TIMEOUT)
+    return data
+
 class AutoflowTest(unittest.TestCase):
+    def test_global_timeout_works(self):
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(None, ["a"]))
+        flow.add_transformation_fn(sleep_transformation, requires=["a"], adds=None)
+        with self.assertRaises((queue.Empty, queue.Full)):
+            flow.run()
+
     def test_workers_terminate(self):
         flow = Autoflow()
         flow.add_transformation(TestTransformation(None, ["a"]))
