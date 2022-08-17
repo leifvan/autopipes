@@ -102,12 +102,12 @@ class MeasureSpeedTransformation(CountItemsTransformation):
 
     # noinspection PyMissingOrEmptyDocstring
     def apply(self, data: T):
-        if self.num_items_compared >= self.max_num_items:
+        try:
+            super(MeasureSpeedTransformation, self).apply(data)
+        except SuccessfulComparisonException:
             raise TargetSpeedNotReachedException(f"Did not reach target speed of "
                                                  f"{self.target_items_per_sec} items/s after "
                                                  f"{self.max_num_items} items.")
-
-        super(MeasureSpeedTransformation, self).apply(data)
 
         try:
             items_per_sec = self.num_items_compared / (time() - self.start_time)
