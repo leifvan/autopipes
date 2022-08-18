@@ -96,9 +96,9 @@ class MeasureSpeedTransformation(CountItemsTransformation):
         self.print_every = print_speed_every
 
     # noinspection PyMissingOrEmptyDocstring
-    def thread(self):
+    def thread(self, queue_timeout: float, debug_mode: bool):
         self.start_time = time()
-        super(MeasureSpeedTransformation, self).thread()
+        super(MeasureSpeedTransformation, self).thread(queue_timeout, debug_mode)
 
     # noinspection PyMissingOrEmptyDocstring
     def apply(self, data: T):

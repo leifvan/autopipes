@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import queue
 
-from .autoflow import Transformation, Autoflow, AutoflowDefinitionError, QUEUE_TIMEOUT, AutoflowRuntimeError
+from .autoflow import Transformation, Autoflow, AutoflowDefinitionError, AutoflowRuntimeError
 from .autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException
 
 
@@ -42,10 +42,10 @@ class FaultyTestTransformation(Transformation):
         if data is not None:
             return data
 
-    def thread(self, debug_mode: bool):
+    def thread(self, queue_timeout: float, debug_mode: bool):
         if self.disable_debug_mode:
             debug_mode = False
-        super(FaultyTestTransformation, self).thread(debug_mode)
+        super(FaultyTestTransformation, self).thread(queue_timeout, debug_mode)
 
 
 class TestTransformation(FaultyTestTransformation):
@@ -86,7 +86,7 @@ class CountingTestTransformation(TestTransformation):
 
 
 def sleep_transformation(data):
-    sleep(2 * QUEUE_TIMEOUT)
+    sleep(20)
     return data
 
 
@@ -126,7 +126,7 @@ class AutoflowTest(unittest.TestCase):
         flow.add_transformation(TestTransformation(None, ["a"]))
         flow.add_transformation_fn(sleep_transformation, requires=["a"], adds=None)
         with self.assertRaises((queue.Empty, queue.Full)):
-            flow.run()
+            flow.run(queue_timeout=10)
 
     def test_workers_terminate(self):
         flow = Autoflow()

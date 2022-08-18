@@ -66,7 +66,7 @@ class Transformation:
 
         self.worker = Process(
             target=self.thread,
-            args=(debug_mode,)
+            args=(queue_timeout, debug_mode)
         )
         self.worker.start()
 
