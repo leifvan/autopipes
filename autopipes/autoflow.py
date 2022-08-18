@@ -128,19 +128,19 @@ class Transformation:
 
                 new_data = self.apply(data)
                 if debug_mode and new_data is not None:
-                    expected_keys = [
+                    expected_keys = {
                         *([] if self.requires is None else self.requires),
                         *([] if self.adds is None else self.adds),
                         *previous_keys
-                    ]
-                    missing_keys = [k for k in expected_keys if k not in new_data]
+                    }
+                    missing_keys = {k for k in expected_keys if k not in new_data}
                     if len(missing_keys) > 0:
                         raise AutoflowRuntimeError(f"Debug mode: Transformed data object is "
                                                    f"missing keys. Expected {expected_keys}, but "
                                                    f"keys {missing_keys} are missing.")
 
                     try:
-                        superfluous_keys = [k for k in new_data if k not in expected_keys]
+                        superfluous_keys = {k for k in new_data if k not in expected_keys}
                         if len(superfluous_keys) > 0:
                             raise AutoflowRuntimeError(f"Debug mode: Transformed data object has "
                                                        f"too many keys. Expected only "
