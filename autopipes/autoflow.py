@@ -101,15 +101,44 @@ class Transformation:
         try:
             while not self.abort_event.is_set():
                 data = None if self.in_queue is None else self.in_queue.get(timeout=QUEUE_TIMEOUT)
+                self.on_data_received(data)
+
                 new_data = self.apply(data)
+                self.on_data_transformed(data)
+
                 if self.out_queue is not None:
                     self.out_queue.put(new_data, timeout=QUEUE_TIMEOUT)
+                self.on_data_queued(data)
 
         except Exception as e:
             print(f"[Autoflow] {self} has caused an exception: {e}", file=sys.stderr, flush=True)
             traceback.print_tb(e.__traceback__, file=sys.stderr)
             self.abort_event.set()
             self.exception_queue.put(e, timeout=QUEUE_TIMEOUT)
+
+    def on_data_received(self, data: T) -> None:
+        """
+        Callback method that is called after the worker loop has received new data from the
+        incoming queue.
+        :param data: The incoming data.
+        """
+        pass
+
+    def on_data_transformed(self, data: T):
+        """
+        Callback method that is called after the worker loop has transformed the data using the
+        apply method.
+        :param data: The transformed data.
+        """
+        pass
+
+    def on_data_queued(self, data: T):
+        """
+        Callback method that is called after the worker loop queued the transformed data into the
+        output queue.
+        :param data: The transformed data.
+        """
+        pass
 
     def apply(self, data: T):
         """
