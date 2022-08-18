@@ -109,13 +109,19 @@ class Transformation:
                 # receive data
 
                 data = None if self.in_queue is None else self.in_queue.get(timeout=queue_timeout)
-                if debug_mode and data is not None:
-                    expected_keys = [] if self.requires is None else self.requires
-                    missing_keys = [r for r in expected_keys if r not in data]
-                    if len(missing_keys) > 0:
-                        raise AutoflowRuntimeError(f"Debug mode: Incoming data object is missing "
-                                                   f"required keys. Expected {expected_keys}, but "
-                                                   f"keys {missing_keys} are missing.")
+                if debug_mode:
+                    if data is not None:
+                        expected_keys = [] if self.requires is None else self.requires
+                        missing_keys = [r for r in expected_keys if r not in data]
+                        if len(missing_keys) > 0:
+                            raise AutoflowRuntimeError(f"Debug mode: Incoming data object is missing "
+                                                       f"required keys. Expected {expected_keys}, but "
+                                                       f"keys {missing_keys} are missing.")
+                    try:
+                        previous_keys = [k for k in data]
+                    except TypeError:
+                        previous_keys = []
+
                 self.on_data_received(data)
 
                 # transform data
@@ -124,7 +130,8 @@ class Transformation:
                 if debug_mode and new_data is not None:
                     expected_keys = [
                         *([] if self.requires is None else self.requires),
-                        *([] if self.adds is None else self.adds)
+                        *([] if self.adds is None else self.adds),
+                        *previous_keys
                     ]
                     missing_keys = [k for k in expected_keys if k not in new_data]
                     if len(missing_keys) > 0:
@@ -139,7 +146,7 @@ class Transformation:
                                                        f"too many keys. Expected only "
                                                        f"{expected_keys}, but keys "
                                                        f"{superfluous_keys} are also present.")
-                    except AttributeError:
+                    except TypeError:
                         pass
                 self.on_data_transformed(data)
 

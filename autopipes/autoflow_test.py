@@ -6,7 +6,8 @@ from typing import List, Optional
 import queue
 
 from .autoflow import Transformation, Autoflow, AutoflowDefinitionError, AutoflowRuntimeError
-from .autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException
+from .autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException, \
+    CountItemsTransformation, SuccessfulComparisonException
 
 
 class TestException(Exception):
@@ -91,6 +92,15 @@ def sleep_transformation(data):
 
 
 class AutoflowTest(unittest.TestCase):
+    def test_debug_mode_accepts_not_required_keys_being_present(self):
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(requires=None, adds=["a"]))
+        flow.add_transformation(TestTransformation(requires=None, adds=["b"]))
+        flow.add_transformation(CountItemsTransformation(requires=["a", "b"], num_items=10))
+
+        with self.assertRaises(SuccessfulComparisonException):
+            flow.run(debug_mode=True)
+
     def test_debug_mode_recognizes_missing_keys_before_transformation(self):
         flow = Autoflow()
         flow.add_transformation(TestTransformation(requires=None, adds=["a"]))
