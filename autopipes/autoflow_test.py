@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import queue
 
-from .autoflow import Transformation, Autoflow, AutoflowDefinitionError, QUEUE_TIMEOUT
+from .autoflow import Transformation, Autoflow, AutoflowDefinitionError, QUEUE_TIMEOUT, AutoflowRuntimeError
 from .autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException
 
 
@@ -13,24 +13,48 @@ class TestException(Exception):
     pass
 
 
-class TestTransformation(Transformation):
+class FaultyTestTransformation(Transformation):
+    def __init__(
+            self,
+            requires: Optional[List[str]],
+            should_add: Optional[List[str]],
+            actually_adds: Optional[List[str]],
+            erases: Optional[List[str]] = None,
+            disable_debug_mode: bool = False
+    ):
+        super(FaultyTestTransformation, self).__init__(requires=requires, adds=should_add)
+        self.actually_adds = actually_adds
+        self.erases = erases
+        self.disable_debug_mode = disable_debug_mode
+
+    def apply(self, data):
+        if data is None:
+            data = dict()
+
+        if self.erases is not None:
+            for field in self.erases:
+                del data[field]
+
+        if self.actually_adds is not None:
+            for field in self.actually_adds:
+                data[field] = 0
+
+        if data is not None:
+            return data
+
+    def thread(self, debug_mode: bool):
+        if self.disable_debug_mode:
+            debug_mode = False
+        super(FaultyTestTransformation, self).thread(debug_mode)
+
+
+class TestTransformation(FaultyTestTransformation):
     def __init__(
             self,
             requires: Optional[List[str]],
             adds: Optional[List[str]],
     ):
-        super(TestTransformation, self).__init__(requires=requires, adds=adds)
-        self.start_time = time()
-        self.num_items = 0
-
-    def apply(self, data):
-        if data is None:
-            data = dict()
-        if self.adds is not None:
-            for field in self.adds:
-                data[field] = 0
-            return data
-        self.num_items += 1
+        super(TestTransformation, self).__init__(requires=requires, should_add=adds, actually_adds=adds)
 
 
 class CountingCompleteException(Exception):
@@ -65,7 +89,38 @@ def sleep_transformation(data):
     sleep(2 * QUEUE_TIMEOUT)
     return data
 
+
 class AutoflowTest(unittest.TestCase):
+    def test_debug_mode_recognizes_missing_keys_before_transformation(self):
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(requires=None, adds=["a"]))
+        flow.add_transformation(FaultyTestTransformation(
+            requires=["a"],
+            should_add=["b"],
+            actually_adds=None,
+            disable_debug_mode=True
+        ))
+        flow.add_transformation(TestTransformation(requires=["b"], adds=None))
+
+        with self.assertRaises(AutoflowRuntimeError):
+            flow.run(allow_unused_annotations=True, debug_mode=True)
+
+    def test_debug_mode_recognizes_missing_keys_after_transformation(self):
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(requires=None, adds=["a"]))
+        flow.add_transformation(FaultyTestTransformation(requires=["a"], should_add=["b"], actually_adds=["c"]))
+
+        with self.assertRaises(AutoflowRuntimeError):
+            flow.run(allow_unused_annotations=True, debug_mode=True)
+
+    def test_debug_mode_recognizes_additional_keys_after_transformation(self):
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(requires=None, adds=["a"]))
+        flow.add_transformation(FaultyTestTransformation(requires=["a"], should_add=["b"], actually_adds=["b", "c"]))
+
+        with self.assertRaises(AutoflowRuntimeError):
+            flow.run(allow_unused_annotations=True, debug_mode=True)
+
     def test_global_timeout_works(self):
         flow = Autoflow()
         flow.add_transformation(TestTransformation(None, ["a"]))

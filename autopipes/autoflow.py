@@ -16,7 +16,6 @@ from typing import Generic, Collection, List, Container, Optional, Hashable, Typ
 import networkx as nx
 
 T = TypeVar("T", bound=Container)
-QUEUE_TIMEOUT = 60
 
 
 class AutoflowDefinitionError(Exception):
@@ -25,6 +24,10 @@ class AutoflowDefinitionError(Exception):
 
 class AutoflowInitializationError(Exception):
     """Raised if an internal error occurs while initialization the flow."""
+
+
+class AutoflowRuntimeError(RuntimeError):
+    """Raised if an issue occured while the flow is running."""
 
 
 @dataclass
@@ -52,7 +55,9 @@ class Transformation:
             in_queue: Queue,
             out_queue: Queue,
             abort_event: Event,
-            exception_queue: Queue
+            exception_queue: Queue,
+            queue_timeout: float,
+            debug_mode: bool
     ):
         self.in_queue = in_queue
         self.out_queue = out_queue
@@ -61,7 +66,7 @@ class Transformation:
 
         self.worker = Process(
             target=self.thread,
-            args=tuple()
+            args=(debug_mode,)
         )
         self.worker.start()
 
@@ -89,7 +94,7 @@ class Transformation:
         """
         return self.adds is None
 
-    def thread(self):
+    def thread(self, queue_timeout: float, debug_mode: bool):
         """
         This method will be run in a subprocess when ``_initialize`` is called. It is expected to
         process items from ``in_queue`` and put the results into the ``out_queue`` as long as the
@@ -100,21 +105,55 @@ class Transformation:
         """
         try:
             while not self.abort_event.is_set():
-                data = None if self.in_queue is None else self.in_queue.get(timeout=QUEUE_TIMEOUT)
+
+                # receive data
+
+                data = None if self.in_queue is None else self.in_queue.get(timeout=queue_timeout)
+                if debug_mode and data is not None:
+                    expected_keys = [] if self.requires is None else self.requires
+                    missing_keys = [r for r in expected_keys if r not in data]
+                    if len(missing_keys) > 0:
+                        raise AutoflowRuntimeError(f"Debug mode: Incoming data object is missing "
+                                                   f"required keys. Expected {expected_keys}, but "
+                                                   f"keys {missing_keys} are missing.")
                 self.on_data_received(data)
 
+                # transform data
+
                 new_data = self.apply(data)
+                if debug_mode and new_data is not None:
+                    expected_keys = [
+                        *([] if self.requires is None else self.requires),
+                        *([] if self.adds is None else self.adds)
+                    ]
+                    missing_keys = [k for k in expected_keys if k not in new_data]
+                    if len(missing_keys) > 0:
+                        raise AutoflowRuntimeError(f"Debug mode: Transformed data object is "
+                                                   f"missing keys. Expected {expected_keys}, but "
+                                                   f"keys {missing_keys} are missing.")
+
+                    try:
+                        superfluous_keys = [k for k in new_data if k not in expected_keys]
+                        if len(superfluous_keys) > 0:
+                            raise AutoflowRuntimeError(f"Debug mode: Transformed data object has "
+                                                       f"too many keys. Expected only "
+                                                       f"{expected_keys}, but keys "
+                                                       f"{superfluous_keys} are also present.")
+                    except AttributeError:
+                        pass
                 self.on_data_transformed(data)
 
+                # queue data
+
                 if self.out_queue is not None:
-                    self.out_queue.put(new_data, timeout=QUEUE_TIMEOUT)
+                    self.out_queue.put(new_data, timeout=queue_timeout)
                 self.on_data_queued(data)
 
         except Exception as e:
             print(f"[Autoflow] {self} has caused an exception: {e}", file=sys.stderr, flush=True)
             traceback.print_tb(e.__traceback__, file=sys.stderr)
             self.abort_event.set()
-            self.exception_queue.put(e, timeout=QUEUE_TIMEOUT)
+            self.exception_queue.put(e, timeout=queue_timeout)
 
     def on_data_received(self, data: T) -> None:
         """
@@ -233,7 +272,9 @@ class Autoflow(Generic[T]):
     def run(
             self,
             allow_unused_annotations: bool = False,
-            optimize: OptimizationMode = None
+            optimize: OptimizationMode = None,
+            queue_timeout: float = 60,
+            debug_mode: bool = False
     ) -> None:
         """
         Runs the pipeline until the abort_event is set in one of the transformations.
@@ -259,9 +300,12 @@ class Autoflow(Generic[T]):
 
 
         :param allow_unused_annotations: If ``True``, this method will not throw an exception if
-             transformations are added whose annotations are not required by any other
-             transformation.
+            transformations are added whose annotations are not required by any other
+            transformation.
         :param optimize: Can be ``earliest_sinks``, ``"min_annotations"`` or ``None``.
+        :param queue_timeout: Timeout (in seconds) for the queues used in the flow.
+        :param debug_mode: If ``True``, the transformations are supposed to check the validity
+            of incoming and transformed data during runtime.
         """
 
         # check if there are any transformations
@@ -339,7 +383,9 @@ class Autoflow(Generic[T]):
                 in_queue=last_queue,
                 out_queue=next_queue,
                 abort_event=abort_event,
-                exception_queue=exception_queue
+                exception_queue=exception_queue,
+                queue_timeout=queue_timeout,
+                debug_mode=debug_mode
             )
 
         # run and wait for exceptions in the respective queue
