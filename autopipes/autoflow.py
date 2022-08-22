@@ -109,9 +109,13 @@ class Transformation:
                 # receive data
 
                 data = None if self.in_queue is None else self.in_queue.get(timeout=queue_timeout)
+
                 if debug_mode:
-                    if data is not None:
-                        expected_keys = [] if self.requires is None else self.requires
+                    expected_keys = [] if self.requires is None else self.requires
+                    if data is None and len(expected_keys) > 0:
+                        raise AutoflowRuntimeError(f"Debug mode: Incoming data object is None, but "
+                                                   f"keys {expected_keys} were expected.")
+                    elif data is not None:
                         missing_keys = [r for r in expected_keys if r not in data]
                         if len(missing_keys) > 0:
                             raise AutoflowRuntimeError(f"Debug mode: Incoming data object is missing "
@@ -127,27 +131,31 @@ class Transformation:
                 # transform data
 
                 new_data = self.apply(data)
-                if debug_mode and new_data is not None:
+                if debug_mode:
                     expected_keys = {
                         *([] if self.requires is None else self.requires),
                         *([] if self.adds is None else self.adds),
                         *previous_keys
                     }
-                    missing_keys = {k for k in expected_keys if k not in new_data}
-                    if len(missing_keys) > 0:
-                        raise AutoflowRuntimeError(f"Debug mode: Transformed data object is "
-                                                   f"missing keys. Expected {expected_keys}, but "
-                                                   f"keys {missing_keys} are missing.")
+                    if len(expected_keys) > 0 and new_data is None:
+                        raise AutoflowRuntimeError(f"Debug mode: Transformed data object is None, "
+                                                   f"but keys {expected_keys} were expected.")
+                    elif new_data is not None:
+                        missing_keys = {k for k in expected_keys if k not in new_data}
+                        if len(missing_keys) > 0:
+                            raise AutoflowRuntimeError(f"Debug mode: Transformed data object is "
+                                                       f"missing keys. Expected {expected_keys}, but "
+                                                       f"keys {missing_keys} are missing.")
 
-                    try:
-                        superfluous_keys = {k for k in new_data if k not in expected_keys}
-                        if len(superfluous_keys) > 0:
-                            raise AutoflowRuntimeError(f"Debug mode: Transformed data object has "
-                                                       f"too many keys. Expected only "
-                                                       f"{expected_keys}, but keys "
-                                                       f"{superfluous_keys} are also present.")
-                    except TypeError:
-                        pass
+                        try:
+                            superfluous_keys = {k for k in new_data if k not in expected_keys}
+                            if len(superfluous_keys) > 0:
+                                raise AutoflowRuntimeError(f"Debug mode: Transformed data object has "
+                                                           f"too many keys. Expected only "
+                                                           f"{expected_keys}, but keys "
+                                                           f"{superfluous_keys} are also present.")
+                        except TypeError:
+                            pass
                 self.on_data_transformed(data)
 
                 # queue data
@@ -379,6 +387,18 @@ class Autoflow(Generic[T]):
 
         # sort transformations array according to topological order
         self.transformations = [self.transformations[i] for i in top_sort_indices]
+
+        if debug_mode:
+            print()
+            print("#" * 20)
+            print()
+            print("Autoflow transformation order:")
+            print()
+            for t in self.transformations:
+                print("-", t)
+            print()
+            print("#" * 20)
+            print()
 
         # create queues and events
         abort_event = Event()
