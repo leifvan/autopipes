@@ -40,8 +40,7 @@ class FaultyTestTransformation(Transformation):
             for field in self.actually_adds:
                 data[field] = 0
 
-        if data is not None:
-            return data
+        return data
 
     def thread(self, queue_timeout: float, debug_mode: bool):
         if self.disable_debug_mode:

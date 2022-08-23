@@ -49,6 +49,8 @@ class CompareItemsTransformation(Transformation):
             raise SuccessfulComparisonException(f"Successfully compared {self.num_items_compared} "
                                                 f"items.")
 
+        return data
+
 
 class CountItemsTransformation(CompareItemsTransformation):
     """

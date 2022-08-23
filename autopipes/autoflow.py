@@ -333,7 +333,10 @@ class Autoflow(Generic[T]):
             if t.adds is not None:
                 for add in t.adds:
                     if add in producers:
-                        raise AutoflowDefinitionError("More than one transformation adds the same value.")
+                        raise AutoflowDefinitionError(
+                            f"'{t}' adds key '{add}' which was already added by "
+                            f"'{self.transformations[producers[add]]}'. Multiple transformations "
+                            f"adding the same key is not allowed.")
                     producers[add] = idx
 
         # create a graph that represents a partial ordering of the transformations
