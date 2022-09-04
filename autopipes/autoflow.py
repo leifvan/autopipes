@@ -44,6 +44,7 @@ class Transformation:
 
     requires: Optional[Collection[Hashable]]
     adds: Optional[Collection[Hashable]]
+    optional: bool = False
     worker: Optional[Process] = None
     in_queue: Optional[Queue] = None
     out_queue: Optional[Queue] = None
@@ -234,8 +235,10 @@ class Autoflow(Generic[T]):
     def add_transformation(self, transformation: Transformation) -> None:
         """
         Adds a new ``Transformation`` object to the pipeline.
+
         :param transformation: The ``Transformation`` object to be added.
         """
+
         self.transformations.append(transformation)
 
     def add_transformation_fn(
@@ -255,7 +258,7 @@ class Autoflow(Generic[T]):
         """
         t = Transformation(requires, adds)
         t.apply = transformation_fn
-        self.add_transformation(t)
+        self.add_transformation(transformation=t)
 
     def _loss_earliest_sinks(self, sort: Iterable[int]) -> float:
         sink_indices = [i for i, t in enumerate(self.transformations) if t.is_sink()]
@@ -326,6 +329,21 @@ class Autoflow(Generic[T]):
         # check if there are any transformations
         if len(self.transformations) == 0:
             raise AutoflowDefinitionError("No transformations were added to the flow.")
+
+        # remove optional transformations
+        to_be_removed = []
+        cur_adds = set()
+        for t in self.transformations:
+            if t.optional and any(k in cur_adds for k in t.adds):
+                to_be_removed.append(t)
+                if debug_mode:
+                    print(f"Removed optional transformation {t}, because at least one of the keys "
+                          f"{t.adds} were added by a previous transformation.")
+            elif t.adds is not None:
+                cur_adds.update(t.adds)
+
+        for t in to_be_removed:
+            self.transformations.remove(t)
 
         # create a map: annotation -> transformation adding it
         producers = dict()

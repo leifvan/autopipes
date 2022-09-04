@@ -1,9 +1,8 @@
+import queue
 import unittest
 from multiprocessing import Semaphore
-from time import time, sleep
+from time import sleep
 from typing import List, Optional
-
-import queue
 
 from .autoflow import Transformation, Autoflow, AutoflowDefinitionError, AutoflowRuntimeError
 from .autoflow_test_utils import RaiseExceptionTransformation, MeasureSpeedTransformation, TargetSpeedReachedException, \
@@ -21,9 +20,10 @@ class FaultyTestTransformation(Transformation):
             should_add: Optional[List[str]],
             actually_adds: Optional[List[str]],
             erases: Optional[List[str]] = None,
-            disable_debug_mode: bool = False
+            disable_debug_mode: bool = False,
+            optional: bool = False
     ):
-        super(FaultyTestTransformation, self).__init__(requires=requires, adds=should_add)
+        super(FaultyTestTransformation, self).__init__(requires=requires, adds=should_add, optional=optional)
         self.actually_adds = actually_adds
         self.erases = erases
         self.disable_debug_mode = disable_debug_mode
@@ -53,8 +53,10 @@ class TestTransformation(FaultyTestTransformation):
             self,
             requires: Optional[List[str]],
             adds: Optional[List[str]],
+            optional: bool = False
     ):
-        super(TestTransformation, self).__init__(requires=requires, should_add=adds, actually_adds=adds)
+        super(TestTransformation, self).__init__(requires=requires, should_add=adds, actually_adds=adds,
+                                                 optional=optional)
 
 
 class CountingCompleteException(Exception):
@@ -320,6 +322,61 @@ class AutoflowTest(unittest.TestCase):
             print_speed_every=100)
         )
         with self.assertRaises(TargetSpeedReachedException):
+            flow.run()
+
+    def test_flow_runs_with_optional_transformation_removed(self):
+        """
+        Test if optional nodes a removed correctly.
+        """
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(None, ["a"], optional=False))
+        flow.add_transformation(TestTransformation(None, ["a", "b"], optional=True))
+        flow.add_transformation(RaiseExceptionTransformation(["a"], None, TestException))
+
+        # the second transformation should not exist such that the flow runs without problems.
+        with self.assertRaises(TestException):
+            flow.run()
+
+    def test_flow_construction_fails_if_optional_transformation_was_removed(self):
+        """
+        Test if optional nodes a removed correctly.
+        """
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(None, ["a"], optional=False))
+        flow.add_transformation(TestTransformation(None, ["a", "b"], optional=True))
+        flow.add_transformation(TestTransformation(["b"], None))
+
+        # As the second transformation does not exist, it should not be possible to add another
+        # transformation that uses "b".
+        with self.assertRaises(AutoflowDefinitionError):
+            flow.run()
+
+    def test_non_optional_transformations_are_not_considered_after_optional_ones(self):
+        """
+        Even though the first transformation is optional, the code considers the transformations
+        in order and adds the first, ignoring the fact that it is followed by a non-optional
+        transformation.
+        """
+
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(None, ["a"], optional=True))
+        flow.add_transformation(TestTransformation(None, ["a"], optional=False))
+        flow.add_transformation(TestTransformation(["a"], None))
+
+        with self.assertRaises(AutoflowDefinitionError):
+            flow.run()
+
+    def test_optional_transformations_are_selected_in_order_of_adding(self):
+        """
+        If multiple optional transformations producing the same key are defined, the one first
+        added should be chosen.
+        """
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(None, ["a"], optional=True))
+        flow.add_transformation(TestTransformation(None, ["a", "b"], optional=True))
+        flow.add_transformation(TestTransformation(["b"], None))
+
+        with self.assertRaises(AutoflowDefinitionError):
             flow.run()
 
 
