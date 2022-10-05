@@ -330,15 +330,27 @@ class Autoflow(Generic[T]):
         if len(self.transformations) == 0:
             raise AutoflowDefinitionError("No transformations were added to the flow.")
 
-        # remove optional transformations
+        # remove optional source transformations
+        for t in self.transformations:
+            if t.optional and t.requires is None:
+                raise AutoflowDefinitionError(f"Can not add transformation {t}, because optional "
+                                              f"source transformations are currently not "
+                                              f"supported.")
+
+        # remove optional transformations based on previous transformations
         to_be_removed = []
         cur_adds = set()
         for t in self.transformations:
-            if t.optional and any(k in cur_adds for k in t.adds):
+            if t.optional and t.adds is not None and any(k in cur_adds for k in t.adds):
                 to_be_removed.append(t)
                 if debug_mode:
                     print(f"Removed optional transformation {t}, because at least one of the keys "
                           f"{t.adds} were added by a previous transformation.")
+            elif t.optional and any(k not in cur_adds for k in t.requires):
+                to_be_removed.append(t)
+                if debug_mode:
+                    print(f"Removed optional transformation {t}, because at least one of the "
+                          f"required keys {t.requires} is not added by any transformation.")
             elif t.adds is not None:
                 cur_adds.update(t.adds)
 

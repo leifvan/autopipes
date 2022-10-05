@@ -329,9 +329,10 @@ class AutoflowTest(unittest.TestCase):
         Test if optional nodes a removed correctly.
         """
         flow = Autoflow()
-        flow.add_transformation(TestTransformation(None, ["a"], optional=False))
-        flow.add_transformation(TestTransformation(None, ["a", "b"], optional=True))
-        flow.add_transformation(RaiseExceptionTransformation(["a"], None, TestException))
+        flow.add_transformation(TestTransformation(None, ["a"]))
+        flow.add_transformation(TestTransformation(["a"], ["b"], optional=False))
+        flow.add_transformation(TestTransformation(["a"], ["b", "c"], optional=True))
+        flow.add_transformation(RaiseExceptionTransformation(["b"], None, TestException))
 
         # the second transformation should not exist such that the flow runs without problems.
         with self.assertRaises(TestException):
@@ -359,9 +360,10 @@ class AutoflowTest(unittest.TestCase):
         """
 
         flow = Autoflow()
-        flow.add_transformation(TestTransformation(None, ["a"], optional=True))
-        flow.add_transformation(TestTransformation(None, ["a"], optional=False))
-        flow.add_transformation(TestTransformation(["a"], None))
+        flow.add_transformation(TestTransformation(None, ["a"]))
+        flow.add_transformation(TestTransformation(["a"], ["b"], optional=True))
+        flow.add_transformation(TestTransformation(["a"], ["b"], optional=False))
+        flow.add_transformation(TestTransformation(["b"], None))
 
         with self.assertRaises(AutoflowDefinitionError):
             flow.run()
@@ -372,12 +374,30 @@ class AutoflowTest(unittest.TestCase):
         added should be chosen.
         """
         flow = Autoflow()
-        flow.add_transformation(TestTransformation(None, ["a"], optional=True))
-        flow.add_transformation(TestTransformation(None, ["a", "b"], optional=True))
-        flow.add_transformation(TestTransformation(["b"], None))
+        flow.add_transformation(TestTransformation(None, ["a"]))
+        flow.add_transformation(TestTransformation(["a"], ["b"], optional=True))
+        flow.add_transformation(TestTransformation(["a"], ["b", "c"], optional=True))
+        flow.add_transformation(TestTransformation(["c"], None))
 
         with self.assertRaises(AutoflowDefinitionError):
             flow.run()
+
+    def test_optional_source_transformations_not_supported(self):
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(None, ["a"], optional=True))
+
+        with self.assertRaises(AutoflowDefinitionError):
+            flow.run()
+
+    def test_optional_transformations_ignored_if_not_required(self):
+        flow = Autoflow()
+        flow.add_transformation(TestTransformation(None, ["a"]))
+        flow.add_transformation(RaiseExceptionTransformation(["a"], None, TestException))
+        flow.add_transformation(TestTransformation(["c"], None, optional=True))
+        flow.add_transformation(TestTransformation(["b"], ["c"], optional=True))
+
+        with self.assertRaises(TestException):
+            flow.run(debug_mode=True)
 
 
 if __name__ == '__main__':
