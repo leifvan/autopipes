@@ -1,7 +1,7 @@
 """
 A simple, low-overhead, UIMA-style pipeline that uses dictionaries as its basic data model. The
 pipeline nodes are defined by transformation functions that require specific fields of the data to
-be present and and add new fields to it.
+be present and add new fields to it.
 """
 
 import queue
@@ -70,6 +70,12 @@ class Transformation:
             args=(queue_timeout, debug_mode)
         )
         self.worker.start()
+
+    def _join(self, timeout: float = None):
+        self.worker.join(timeout)
+
+    def _kill(self):
+        self.worker.kill()
 
     def can_process(self, item: Container) -> bool:
         """
@@ -460,8 +466,8 @@ class Autoflow(Generic[T]):
 
         # abort_event was set; briefly try to join the workers, kill them if it takes too long
         for t in self.transformations:
-            t.worker.join(timeout=1)
-            t.worker.kill()
+            t._join(timeout=1)
+            t._kill()
 
         # throw the next exception, if any
         if abort_exception is None:
