@@ -1,9 +1,8 @@
-import graphviz
-
 from autopipes import Pipeline
 
 
 def visualize_pipeline(pipeline: Pipeline, output_path="temp", ignore_nodes=tuple()):
+    import graphviz
     dot = graphviz.Digraph()
 
     for node_name in pipeline.nodes.keys():
